@@ -5,6 +5,8 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 const Eyes = () => {
   const [eyePosition, setEyePosition] = useState({ x: 0, y: 0 });
   const [springPosition, setSpringPosition] = useState({ x: 0, y: 0 });
+  const lastPosition = useRef({ x: 0, y: 0 });
+  const velocityRef = useRef({ x: 0, y: 0 });
   const [isDizzy, setIsDizzy] = useState(false);
   const [currentMood, setCurrentMood] = useState<'normal' | 'happy' | 'sleepy' | 'surprised' | 'angry'>('normal');
   const [permission, setPermission] = useState<PermissionState>('prompt');
@@ -38,8 +40,18 @@ const Eyes = () => {
     setEyeState('looking');
     stopAutoMove();
     stopMoodChanges();
-    setCurrentMood('normal');
-  }, []);
+    
+    // Show surprised or angry mood randomly when transitioning from static
+    if (eyeState === 'static') {
+      const suddenMood = Math.random() < 0.5 ? 'surprised' : 'angry';
+      setCurrentMood(suddenMood);
+      
+      // Return to normal mood after animation
+      setTimeout(() => {
+        setCurrentMood('normal');
+      }, 1000);
+    }
+  }, [eyeState]);
 
   const transitionToDizzy = useCallback(() => {
     setEyeState('dizzy');
@@ -60,11 +72,23 @@ const Eyes = () => {
 
   // Auto movement for static state
   const movePatterns = [
-    { x: 0, y: 0 },
-    { x: 8, y: -5 },
-    { x: -8, y: -5 },
-    { x: 8, y: 5 },
-    { x: -8, y: 5 },
+    { x: 0, y: 0 },    // center
+    { x: 0, y: -8 },   // look up
+    { x: 0, y: 0 },    // return to center
+    { x: 0, y: 8 },    // look down
+    { x: 0, y: 0 },    // return to center
+    { x: -8, y: 0 },   // look left
+    { x: 0, y: 0 },    // return to center
+    { x: 8, y: 0 },    // look right
+    { x: 0, y: 0 },    // return to center
+    { x: -8, y: -8 },  // look top-left
+    { x: 0, y: 0 },    // return to center
+    { x: 8, y: -8 },   // look top-right
+    { x: 0, y: 0 },    // return to center
+    { x: -8, y: 8 },   // look bottom-left
+    { x: 0, y: 0 },    // return to center
+    { x: 8, y: 8 },    // look bottom-right
+    { x: 0, y: 0 },    // return to center
   ];
 
   const startAutoMove = useCallback(() => {
@@ -73,11 +97,26 @@ const Eyes = () => {
     }
 
     let patternIndex = 0;
-    autoMoveInterval.current = setInterval(() => {
+    const moveToNextPosition = () => {
+      if (currentMood === 'sleepy') {
+        // Stop moving when sleepy
+        if (autoMoveInterval.current) {
+          clearInterval(autoMoveInterval.current);
+          autoMoveInterval.current = null;
+        }
+        return;
+      }
+
       setSpringPosition(movePatterns[patternIndex]);
       patternIndex = (patternIndex + 1) % movePatterns.length;
-    }, 2000);
-  }, []);
+    };
+
+    // Move eyes every 1-2 seconds
+    moveToNextPosition(); // Start immediately
+    autoMoveInterval.current = setInterval(() => {
+      moveToNextPosition();
+    }, 1500);
+  }, [currentMood]);
 
   const stopAutoMove = useCallback(() => {
     if (autoMoveInterval.current) {
@@ -88,19 +127,19 @@ const Eyes = () => {
 
   // Mood changes for static state
   const startMoodChanges = useCallback(() => {
-    const moods = ['normal', 'happy', 'sleepy', 'surprised', 'angry'];
+    if (moodChangeInterval.current) {
+      clearTimeout(moodChangeInterval.current);
+    }
 
-    const changeMood = () => {
-      const availableMoods = moods.filter(mood => mood !== currentMood);
-      const newMood = availableMoods[Math.floor(Math.random() * availableMoods.length)] as typeof currentMood;
-      setCurrentMood(newMood);
+    // Start with normal mood
+    setCurrentMood('normal');
 
-      const nextChange = Math.random() * 500 + 500; // Random between 500ms and 1000ms
-      moodChangeInterval.current = setTimeout(changeMood, nextChange);
-    };
-
-    changeMood();
-  }, [currentMood]);
+    // Schedule change to sleepy mood after 10-30 seconds
+    const sleepyDelay = Math.random() * 20000 + 10000; // Random between 10s and 30s
+    moodChangeInterval.current = setTimeout(() => {
+      setCurrentMood('sleepy');
+    }, sleepyDelay);
+  }, []);
 
   const stopMoodChanges = useCallback(() => {
     if (moodChangeInterval.current) {
@@ -141,11 +180,35 @@ const Eyes = () => {
         }
       }
 
-      // Update eye position for looking state
+      // Update eye position for looking state with smoothing
       if (eyeState === 'looking') {
-        const newX = Math.max(Math.min(x * 2, MAX_MOVEMENT), -MAX_MOVEMENT);
-        const newY = Math.max(Math.min(y * 2, MAX_MOVEMENT), -MAX_MOVEMENT);
-        setSpringPosition({ x: newX, y: newY });
+        // Reduce sensitivity by scaling down the input
+        const sensitivityScale = 0.3; // Reduce movement sensitivity
+        const smoothingFactor = 0.15; // Lower = smoother movement
+        const maxSpeed = 2; // Maximum speed for position change
+
+        // Calculate target position with reduced sensitivity
+        const targetX = Math.max(Math.min((-x * sensitivityScale), MAX_MOVEMENT), -MAX_MOVEMENT);
+        const targetY = Math.max(Math.min((y * sensitivityScale), MAX_MOVEMENT), -MAX_MOVEMENT);
+
+        // Calculate velocity with smoothing
+        velocityRef.current.x = (targetX - lastPosition.current.x) * smoothingFactor;
+        velocityRef.current.y = (targetY - lastPosition.current.y) * smoothingFactor;
+
+        // Clamp velocity
+        velocityRef.current.x = Math.max(Math.min(velocityRef.current.x, maxSpeed), -maxSpeed);
+        velocityRef.current.y = Math.max(Math.min(velocityRef.current.y, maxSpeed), -maxSpeed);
+
+        // Update position with smoothed velocity
+        const newX = lastPosition.current.x + velocityRef.current.x;
+        const newY = lastPosition.current.y + velocityRef.current.y;
+
+        // Clamp final position
+        const clampedX = Math.max(Math.min(newX, MAX_MOVEMENT), -MAX_MOVEMENT);
+        const clampedY = Math.max(Math.min(newY, MAX_MOVEMENT), -MAX_MOVEMENT);
+
+        lastPosition.current = { x: clampedX, y: clampedY };
+        setSpringPosition({ x: clampedX, y: clampedY });
       }
     };
 
@@ -296,15 +359,15 @@ const Eyes = () => {
       }
       @keyframes blinkEyes {
         0%, 90%, 100% { transform: scaleY(1); }
-        95% { transform: scaleY(0.1); }
+        95% { transform: scaleY(0.5); }
       }
       @keyframes happyEyes {
         0%, 100% { transform: scaleY(0.7); }
         50% { transform: scaleY(0.6); }
       }
       @keyframes sleepyEyes {
-        0%, 100% { transform: scaleY(0.3); }
-        50% { transform: scaleY(0.2); }
+        0%, 100% { transform: scaleY(0.6); }
+        50% { transform: scaleY(0.4); }
       }
       @keyframes surprisedEyes {
         0%, 100% { transform: scale(1.2); }
