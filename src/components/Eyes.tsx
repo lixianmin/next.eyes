@@ -29,6 +29,93 @@ const Eyes = () => {
   const springAnimationFrame = useRef<number | null>(null);
   const centerAnimationFrame = useRef<number | null>(null);
 
+  // Eye movement patterns for different moods and behaviors
+  const eyePatterns = {
+    casualGlance1: [
+      { x: 0, y: 0, duration: 500 },    // center
+      { x: 3, y: -4, duration: 300 },   // slight up-right
+      { x: 0, y: 0, duration: 400 },    // center
+      { x: -4, y: 2, duration: 300 },   // slight down-left
+      { x: 0, y: 0, duration: 600 },    // center
+    ],
+    casualGlance2: [
+      { x: 0, y: 0, duration: 400 },    // center
+      { x: 5, y: 3, duration: 300 },    // slight down-right
+      { x: 0, y: 0, duration: 500 },    // center
+      { x: -3, y: -5, duration: 300 },  // slight up-left
+      { x: 0, y: 0, duration: 450 },    // center
+    ],
+    curiousLook1: [
+      { x: 0, y: 0, duration: 400 },     // center
+      { x: 8, y: -6, duration: 400 },    // up-right
+      { x: 8, y: 6, duration: 800 },     // down-right
+      { x: 0, y: 0, duration: 500 },     // center
+    ],
+    curiousLook2: [
+      { x: 0, y: 0, duration: 400 },     // center
+      { x: -7, y: 0, duration: 600 },    // left
+      { x: 7, y: 0, duration: 800 },     // right
+      { x: 0, y: 0, duration: 500 },     // center
+    ],
+    scanning1: [
+      { x: 0, y: 0, duration: 400 },     // center
+      { x: -6, y: -6, duration: 400 },   // top-left
+      { x: 6, y: -6, duration: 600 },    // top-right
+      { x: 6, y: 6, duration: 400 },     // bottom-right
+      { x: -6, y: 6, duration: 600 },    // bottom-left
+      { x: 0, y: 0, duration: 500 },     // center
+    ],
+    playful1: [
+      { x: 0, y: 0, duration: 300 },     // center
+      { x: 8, y: -8, duration: 200 },    // quick top-right
+      { x: -8, y: -8, duration: 200 },   // quick top-left
+      { x: 0, y: 0, duration: 400 },     // center
+      { x: 0, y: 8, duration: 200 },     // quick down
+      { x: 0, y: 0, duration: 500 },     // center
+    ]
+  };
+
+  // Function to get a random pattern
+  const getRandomPattern = () => {
+    const patterns = Object.keys(eyePatterns);
+    const randomIndex = Math.floor(Math.random() * patterns.length);
+    return eyePatterns[patterns[randomIndex]];
+  };
+
+  // Function to animate through a pattern
+  const animatePattern = useCallback((pattern: typeof eyePatterns[keyof typeof eyePatterns]) => {
+    let currentIndex = 0;
+    let startTime: number | null = null;
+
+    const animate = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+
+      if (currentIndex >= pattern.length) {
+        // Pattern complete, start a new random pattern if still in static mode
+        if (eyeState === 'static' && currentMood !== 'sleepy') {
+          const newPattern = getRandomPattern();
+          animatePattern(newPattern);
+        }
+        return;
+      }
+
+      const currentPosition = pattern[currentIndex];
+      if (elapsed >= currentPosition.duration) {
+        // Move to next position
+        setEyePosition({ x: currentPosition.x, y: currentPosition.y });
+        currentIndex++;
+        startTime = timestamp;
+      }
+
+      if (currentIndex < pattern.length) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [eyeState, currentMood]);
+
   // State machine transitions
   const transitionToStatic = useCallback(() => {
     setEyeState('static');
@@ -40,12 +127,12 @@ const Eyes = () => {
     setEyeState('looking');
     stopAutoMove();
     stopMoodChanges();
-    
+
     // Show surprised or angry mood randomly when transitioning from static
     if (eyeState === 'static') {
       const suddenMood = Math.random() < 0.5 ? 'surprised' : 'angry';
       setCurrentMood(suddenMood);
-      
+
       // Return to normal mood after animation
       setTimeout(() => {
         setCurrentMood('normal');
@@ -70,53 +157,16 @@ const Eyes = () => {
     }, DIZZY_DURATION);
   }, []);
 
-  // Auto movement for static state
-  const movePatterns = [
-    { x: 0, y: 0 },    // center
-    { x: 0, y: -8 },   // look up
-    { x: 0, y: 0 },    // return to center
-    { x: 0, y: 8 },    // look down
-    { x: 0, y: 0 },    // return to center
-    { x: -8, y: 0 },   // look left
-    { x: 0, y: 0 },    // return to center
-    { x: 8, y: 0 },    // look right
-    { x: 0, y: 0 },    // return to center
-    { x: -8, y: -8 },  // look top-left
-    { x: 0, y: 0 },    // return to center
-    { x: 8, y: -8 },   // look top-right
-    { x: 0, y: 0 },    // return to center
-    { x: -8, y: 8 },   // look bottom-left
-    { x: 0, y: 0 },    // return to center
-    { x: 8, y: 8 },    // look bottom-right
-    { x: 0, y: 0 },    // return to center
-  ];
-
+  // Start auto movement with new patterns
   const startAutoMove = useCallback(() => {
     if (autoMoveInterval.current) {
       clearInterval(autoMoveInterval.current);
     }
 
-    let patternIndex = 0;
-    const moveToNextPosition = () => {
-      if (currentMood === 'sleepy') {
-        // Stop moving when sleepy
-        if (autoMoveInterval.current) {
-          clearInterval(autoMoveInterval.current);
-          autoMoveInterval.current = null;
-        }
-        return;
-      }
-
-      setSpringPosition(movePatterns[patternIndex]);
-      patternIndex = (patternIndex + 1) % movePatterns.length;
-    };
-
-    // Move eyes every 1-2 seconds
-    moveToNextPosition(); // Start immediately
-    autoMoveInterval.current = setInterval(() => {
-      moveToNextPosition();
-    }, 1500);
-  }, [currentMood]);
+    // Start with a random pattern
+    const initialPattern = getRandomPattern();
+    animatePattern(initialPattern);
+  }, [animatePattern]);
 
   const stopAutoMove = useCallback(() => {
     if (autoMoveInterval.current) {
